@@ -22,6 +22,7 @@ import org.bitcoinj.core.Block;
 import org.bitcoinj.core.StoredBlock;
 import org.bitcoinj.core.VerificationException;
 import org.bitcoinj.net.discovery.*;
+import org.bitcoinj.net.discovery.HttpDiscovery.Details;
 import org.bitcoinj.params.*;
 import org.bitcoinj.script.*;
 import org.bitcoinj.store.BlockStore;
@@ -45,7 +46,33 @@ import org.bitcoinj.utils.VersionTally;
  * intended for unit testing and local app development purposes. Although this class contains some aliases for
  * them, you are encouraged to call the static get() methods on each specific params class directly.</p>
  */
-public abstract class NetworkParameters {
+public abstract class NetworkParameters implements Serializable{
+    protected Object family;
+    protected int addressVersionLength = 1;
+    protected byte tokenId;
+    protected int transactionVersion;
+
+    public Object getFamily() {
+        return this.family;
+    }
+
+    public String getFamilyString() {
+        return this.family == null ? "" : this.family.toString();
+    }
+
+    public int getTransactionVersion() {
+        return this.transactionVersion;
+    }
+
+    public byte getTokenId() {
+        return this.tokenId;
+    }
+    
+    public int getAddressVersionLength() {
+        return this.addressVersionLength;
+    }
+
+    //TODO
     /**
      * The alert signing key originally owned by Satoshi, and now passed on to Gavin along with a few others.
      */
@@ -108,8 +135,14 @@ public abstract class NetworkParameters {
     protected transient MessageSerializer defaultSerializer = null;
 
     protected NetworkParameters() {
-        alertSigningKey = SATOSHI_KEY;
-        genesisBlock = createGenesis(this);
+//        alertSigningKey = SATOSHI_KEY;
+//        genesisBlock = createGenesis(this);
+        this.alertSigningKey = SATOSHI_KEY;
+        this.checkpoints = new HashMap();
+        this.defaultSerializer = null;
+        this.genesisBlock = createGenesis(this);
+        this.httpSeeds = new Details[0];
+        this.transactionVersion = 1;
     }
 
     private static Block createGenesis(NetworkParameters n) {
@@ -149,12 +182,12 @@ public abstract class NetworkParameters {
     /**
      * The maximum number of coins to be generated
      */
-    public static final long MAX_COINS = 21000000;
+//    public static final long MAX_COINS = 21000000;
 
     /**
      * The maximum money to be generated
      */
-    public static final Coin MAX_MONEY = COIN.multiply(MAX_COINS);
+    public static final Coin MAX_MONEY = COIN.multiply(92233720368L);
 
     /** Alias for TestNet3Params.get(), use that instead. */
     @Deprecated

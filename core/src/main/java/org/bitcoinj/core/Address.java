@@ -99,7 +99,7 @@ public class Address extends VersionedChecksummedBytes {
      * <pre>new Address(MainNetParams.get(), Hex.decode("4a22c3c4cbb31e4d03b15550636762bda0baf85a"));</pre>
      */
     public Address(NetworkParameters params, byte[] hash160) {
-        super(params.getAddressHeader(), hash160);
+        super(params.getAddressHeader(), params.getAddressVersionLength(), hash160);
         checkArgument(hash160.length == 20, "Addresses are 160-bit hashes, so you must provide 20 bytes");
         this.params = params;
     }
@@ -107,7 +107,7 @@ public class Address extends VersionedChecksummedBytes {
     /** @deprecated Use {@link #fromBase58(NetworkParameters, String)} */
     @Deprecated
     public Address(@Nullable NetworkParameters params, String address) throws AddressFormatException {
-        super(address);
+        super(params != null ? params.getAddressVersionLength() : 1, address);
         if (params != null) {
             if (!isAcceptableVersion(params, version)) {
                 throw new WrongNetworkException(version, params.getAcceptableAddressCodes());

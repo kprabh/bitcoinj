@@ -41,7 +41,6 @@ import static com.google.common.base.Preconditions.*;
  * one of these, you can call {@link HDKeyDerivation#createMasterPrivateKey(byte[])}.
  */
 public class DeterministicKey extends ECKey {
-
     /** Sorts deterministic keys in the order of their child number. That's <i>usually</i> the order used to derive them. */
     public static final Comparator<ECKey> CHILDNUM_ORDER = new Comparator<ECKey>() {
         @Override
@@ -624,5 +623,15 @@ public class DeterministicKey extends ECKey {
         if (includePrivateKeys) {
             builder.append("  ").append(toStringWithPrivate(aesKey, params)).append("\n");
         }
+    }
+    
+    public void formatKeyWithAddress(boolean includePrivateKeys, StringBuilder builder, NetworkParameters params) {
+        builder.append("  addr:").append(this.toAddress(params));
+        builder.append("  hash160:").append(Utils.HEX.encode(this.getPubKeyHash()));
+        builder.append("  (").append(this.getPathAsString()).append(")\n");
+        if (includePrivateKeys) {
+            builder.append("  ").append(this.toStringWithPrivate(params)).append("\n");
+        }
+
     }
 }

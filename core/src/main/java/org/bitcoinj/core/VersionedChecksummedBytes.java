@@ -22,6 +22,7 @@ import java.io.Serializable;
 import java.util.Arrays;
 
 import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.UnsignedBytes;
 
@@ -36,19 +37,75 @@ import com.google.common.primitives.UnsignedBytes;
 public class VersionedChecksummedBytes implements Serializable, Cloneable, Comparable<VersionedChecksummedBytes> {
     protected final int version;
     protected byte[] bytes;
+    protected final int versionLength;
 
-    protected VersionedChecksummedBytes(String encoded) throws AddressFormatException {
+    protected VersionedChecksummedBytes(int versionLength, String encoded) throws AddressFormatException {
+        boolean z = true;
         byte[] versionAndDataBytes = Base58.decodeChecked(encoded);
-        byte versionByte = versionAndDataBytes[0];
-        version = versionByte & 0xFF;
-        bytes = new byte[versionAndDataBytes.length - 1];
-        System.arraycopy(versionAndDataBytes, 1, bytes, 0, versionAndDataBytes.length - 1);
+        boolean z2 = versionLength > 0 && versionLength <= 3;
+        checkArgument(z2, "Version length exceeded the allowed bounds");
+        this.version = getVersionFromData(versionLength, versionAndDataBytes);
+        this.versionLength = versionLength;
+        this.bytes = new byte[versionAndDataBytes.length - versionLength];
+        if (versionAndDataBytes.length != this.bytes.length + versionLength) {
+            z = false;
+        }
+
+        Preconditions.checkState(z);
+        System.arraycopy(versionAndDataBytes, versionLength, this.bytes, 0, this.bytes.length);
     }
 
-    protected VersionedChecksummedBytes(int version, byte[] bytes) {
-        checkArgument(version >= 0 && version < 256);
+
+    protected VersionedChecksummedBytes(int version, int versionLength, byte[] bytes) {
+        boolean z = true;
+        checkArgument(versionLength < 3, "Version length exceeded the maximum allowed value");
+        if (version < 0 || version >= getMaxVersion(versionLength)) {
+            z = false;
+        }
+
+        checkArgument(z, "Version exceeds the requested size");
         this.version = version;
+        this.versionLength = versionLength;
         this.bytes = bytes;
+    }
+
+    private static int getVersionFromData(int versionLength, byte[] versionAndDataBytes) {
+        int ver = 0;
+
+        for(int i = 0; i < versionLength; ++i) {
+            ver = ver << 8 | versionAndDataBytes[i] & 255;
+        }
+
+        return ver;
+    }
+
+    public static int getExpectedVersion(int expectedDataSize, String encoded) {
+        byte[] versionAndDataBytes = Base58.decodeChecked(encoded);
+        int expectedVerLen = versionAndDataBytes.length - expectedDataSize;
+        if (expectedVerLen >= 0 && expectedVerLen <= 3) {
+            return getVersionFromData(expectedVerLen, versionAndDataBytes);
+        } else {
+            throw new AddressFormatException("No acceptable version length found");
+        }
+    }
+
+    public static int getMaxVersion(int versionLength) {
+        return ~(-1 << versionLength * 8);
+    }
+
+//    protected VersionedChecksummedBytes(String encoded) throws AddressFormatException {
+//        byte[] versionAndDataBytes = Base58.decodeChecked(encoded);
+//        byte versionByte = versionAndDataBytes[0];
+//        version = versionByte & 0xFF;
+//        bytes = new byte[versionAndDataBytes.length - 1];
+//        System.arraycopy(versionAndDataBytes, 1, bytes, 0, versionAndDataBytes.length - 1);
+//    }
+
+    protected VersionedChecksummedBytes(int version, byte[] bytes) {
+//        checkArgument(version >= 0 && version < 256);
+//        this.version = version;
+//        this.bytes = bytes;
+    	 this(version, 1, bytes);
     }
 
     /**
@@ -56,13 +113,25 @@ public class VersionedChecksummedBytes implements Serializable, Cloneable, Compa
      * object, including version and checksum bytes.
      */
     public final String toBase58() {
-        // A stringified buffer is:
-        //   1 byte version + data bytes + 4 bytes check code (a truncated hash)
-        byte[] addressBytes = new byte[1 + bytes.length + 4];
-        addressBytes[0] = (byte) version;
-        System.arraycopy(bytes, 0, addressBytes, 1, bytes.length);
-        byte[] checksum = Sha256Hash.hashTwice(addressBytes, 0, bytes.length + 1);
-        System.arraycopy(checksum, 0, addressBytes, bytes.length + 1, 4);
+//        // A stringified buffer is:
+//        //   1 byte version + data bytes + 4 bytes check code (a truncated hash)
+//        byte[] addressBytes = new byte[1 + bytes.length + 4];
+//        addressBytes[0] = (byte) version;
+//        System.arraycopy(bytes, 0, addressBytes, 1, bytes.length);
+//        byte[] checksum = Sha256Hash.hashTwice(addressBytes, 0, bytes.length + 1);
+//        System.arraycopy(checksum, 0, addressBytes, bytes.length + 1, 4);
+//        return Base58.encode(addressBytes);
+        int totalBytes = this.versionLength + this.bytes.length;
+        byte[] addressBytes = new byte[totalBytes + 4];
+        int ver = this.version;
+
+        for(int i = this.versionLength - 1; i >= 0; --i) {
+            addressBytes[i] = (byte)(ver & 255);
+            ver >>= 8;
+        }
+
+        System.arraycopy(this.bytes, 0, addressBytes, this.versionLength, this.bytes.length);
+        System.arraycopy(Sha256Hash.hashTwice(addressBytes, 0, totalBytes), 0, addressBytes, totalBytes, 4);
         return Base58.encode(addressBytes);
     }
 

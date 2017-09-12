@@ -68,7 +68,7 @@ public class BIP38PrivateKey extends VersionedChecksummedBytes {
     /** @deprecated Use {@link #fromBase58(NetworkParameters, String)} */
     @Deprecated
     public BIP38PrivateKey(NetworkParameters params, String encoded) throws AddressFormatException {
-        super(encoded);
+        super(params.getDumpedPrivateKeyHeader(), encoded);
         this.params = checkNotNull(params);
         if (version != 0x01)
             throw new AddressFormatException("Mismatched version number: " + version);

@@ -69,7 +69,7 @@ public class DumpedPrivateKey extends VersionedChecksummedBytes {
     /** @deprecated Use {@link #fromBase58(NetworkParameters, String)} */
     @Deprecated
     public DumpedPrivateKey(@Nullable NetworkParameters params, String encoded) throws AddressFormatException {
-        super(encoded);
+        super(params.getDumpedPrivateKeyHeader(), encoded);
         if (params != null && version != params.getDumpedPrivateKeyHeader())
             throw new WrongNetworkException(version, new int[]{ params.getDumpedPrivateKeyHeader() });
         if (bytes.length == 33 && bytes[32] == 1) {

@@ -19,6 +19,8 @@ package org.bitcoinj.core;
 
 import org.bitcoinj.core.TransactionConfidence.ConfidenceType;
 import org.bitcoinj.crypto.TransactionSignature;
+import org.bitcoinj.params.Networks;
+import org.bitcoinj.params.Networks.Family;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.script.ScriptError;
@@ -63,6 +65,160 @@ import java.math.BigInteger;
  * <p>Instances of this class are not safe for use by multiple threads.</p>
  */
 public class Transaction extends ChildMessage {
+    private byte[] extraBytes;
+    private long txTime;
+    private byte txTokenId;
+
+    public Coin getValueSentToMe(TransactionBag transactionBag, boolean includeSpent) {
+        Coin v = Coin.ZERO;
+        Iterator it = this.outputs.iterator();
+
+        while(true) {
+            TransactionOutput o;
+            do {
+                do {
+                    if (!it.hasNext()) {
+                        return v;
+                    }
+
+                    o = (TransactionOutput)it.next();
+                } while(!o.isMineOrWatched(transactionBag));
+            } while(!includeSpent && !o.isAvailableForSpending());
+
+            v = v.add(o.getValue());
+        }
+    }
+
+
+    public boolean isCoinStake() {
+        if (!Networks.isFamily(this.params, new Family[]{Family.PEERCOIN, Family.NUBITS, Family.REDDCOIN, Family.VPNCOIN, Family.GRIDCOIN, Family.CLAMS, Family.SOLARCOIN, Family.NAVCOIN})) {
+            return false;
+        } else {
+            return this.inputs.size() > 0 && !((TransactionInput)this.inputs.get(0)).isCoinBase() && this.outputs.size() >= 2 && (this.outputs.get(0) == null);
+        }
+    }
+
+    private int getSigHashType(Transaction.SigHash hashType, boolean anyoneCanPay) {
+        int sigHashType = TransactionSignature.calcSigHashValue(hashType, anyoneCanPay);
+        return Networks.isFamily(this.params, new Family[]{Family.BITCOINCASH}) ? sigHashType | Transaction.SigHash.FORKID.value : sigHashType;
+    }
+
+    private Transaction.SigHash decodeSigHashType(byte sigHashType) {
+        if ((sigHashType & 31) == Transaction.SigHash.ALL.value) {
+            return Transaction.SigHash.ALL;
+        } else if ((sigHashType & 31) == Transaction.SigHash.NONE.value) {
+            return Transaction.SigHash.NONE;
+        } else if ((sigHashType & 31) == Transaction.SigHash.SINGLE.value) {
+            return Transaction.SigHash.SINGLE;
+        } else {
+            throw new IllegalArgumentException("SigHash must be ALL, NONE or SINGLE");
+        }
+    }
+
+    public synchronized Sha256Hash hashForSignatureWitness(int inputIndex, byte[] connectedScript, Coin prevValue, Transaction.SigHash type, boolean anyoneCanPay) {
+        byte sigHashType = (byte)this.getSigHashType(type, anyoneCanPay);
+        UnsafeByteArrayOutputStream bos = new UnsafeByteArrayOutputStream(this.length == -2147483648 ? 256 : this.length + 4);
+
+        try {
+            byte[] hashPrevouts = new byte[32];
+            byte[] hashSequence = new byte[32];
+            byte[] hashOutputs = new byte[32];
+            anyoneCanPay = (sigHashType & -128) == -128;
+            int i;
+            UnsafeByteArrayOutputStream bosHashOutputs;
+            if (!anyoneCanPay) {
+                bosHashOutputs = new UnsafeByteArrayOutputStream(256);
+
+                for(i = 0; i < this.inputs.size(); ++i) {
+                    bosHashOutputs.write(((TransactionInput)this.inputs.get(i)).getOutpoint().getHash().getReversedBytes());
+                    Utils.uint32ToByteStreamLE(((TransactionInput)this.inputs.get(i)).getOutpoint().getIndex(), bosHashOutputs);
+                }
+
+                hashPrevouts = Sha256Hash.hashTwice(bosHashOutputs.toByteArray());
+            }
+
+            if (!anyoneCanPay && type != Transaction.SigHash.SINGLE && type != Transaction.SigHash.NONE) {
+                bosHashOutputs = new UnsafeByteArrayOutputStream(256);
+
+                for(i = 0; i < this.inputs.size(); ++i) {
+                    Utils.uint32ToByteStreamLE(((TransactionInput)this.inputs.get(i)).getSequenceNumber(), bosHashOutputs);
+                }
+
+                hashSequence = Sha256Hash.hashTwice(bosHashOutputs.toByteArray());
+            }
+
+            if (type != Transaction.SigHash.SINGLE && type != Transaction.SigHash.NONE) {
+                bosHashOutputs = new UnsafeByteArrayOutputStream(256);
+
+                for(i = 0; i < this.outputs.size(); ++i) {
+                    Utils.uint64ToByteStreamLE(BigInteger.valueOf(((TransactionOutput)this.outputs.get(i)).getValue().getValue()), bosHashOutputs);
+                    bosHashOutputs.write((new VarInt((long)((TransactionOutput)this.outputs.get(i)).getScriptBytes().length)).encode());
+                    bosHashOutputs.write(((TransactionOutput)this.outputs.get(i)).getScriptBytes());
+                }
+
+                hashOutputs = Sha256Hash.hashTwice(bosHashOutputs.toByteArray());
+            } else if (type == Transaction.SigHash.SINGLE && inputIndex < this.outputs.size()) {
+                bosHashOutputs = new UnsafeByteArrayOutputStream(256);
+                Utils.uint64ToByteStreamLE(BigInteger.valueOf(((TransactionOutput)this.outputs.get(inputIndex)).getValue().getValue()), bosHashOutputs);
+                bosHashOutputs.write((new VarInt((long)((TransactionOutput)this.outputs.get(inputIndex)).getScriptBytes().length)).encode());
+                bosHashOutputs.write(((TransactionOutput)this.outputs.get(inputIndex)).getScriptBytes());
+                hashOutputs = Sha256Hash.hashTwice(bosHashOutputs.toByteArray());
+            }
+
+            Utils.uint32ToByteStreamLE(this.version, bos);
+            bos.write(hashPrevouts);
+            bos.write(hashSequence);
+            bos.write(((TransactionInput)this.inputs.get(inputIndex)).getOutpoint().getHash().getReversedBytes());
+            Utils.uint32ToByteStreamLE(((TransactionInput)this.inputs.get(inputIndex)).getOutpoint().getIndex(), bos);
+            bos.write((new VarInt((long)connectedScript.length)).encode());
+            bos.write(connectedScript);
+            Utils.uint64ToByteStreamLE(BigInteger.valueOf(prevValue.getValue()), bos);
+            Utils.uint32ToByteStreamLE(((TransactionInput)this.inputs.get(inputIndex)).getSequenceNumber(), bos);
+            bos.write(hashOutputs);
+            Utils.uint32ToByteStreamLE(this.lockTime, bos);
+            Utils.uint32ToByteStreamLE((long)(sigHashType & 255), bos);
+        } catch (IOException var13) {
+            throw new RuntimeException(var13);
+        }
+
+        return Sha256Hash.twiceOf(bos.toByteArray());
+    }
+
+
+    protected void bitcoinSerializeToStream(OutputStream r13, boolean r14) throws IOException {
+        throw new UnsupportedOperationException("Method not decompiled: org.bitcoinj.core.Transaction.bitcoinSerializeToStream(java.io.OutputStream, boolean):void");
+    }
+
+    public void setVersion(long version) {
+        this.version = version;
+        this.unCache();
+    }
+
+    public long getTime() {
+        return this.txTime;
+    }
+
+    public void setTime(long time) {
+        this.txTime = time;
+        this.unCache();
+    }
+
+    public byte getTokenId() {
+        return this.txTokenId;
+    }
+
+    public void setTokenId(byte tokenId) {
+        this.txTokenId = tokenId;
+    }
+
+    public byte[] getExtraBytes() {
+        return this.extraBytes;
+    }
+
+    public void setExtraBytes(byte[] extraBytes) {
+        this.extraBytes = extraBytes;
+    }
+    //TODO
     /**
      * A comparator that can be used to sort transactions by their updateTime field. The ordering goes from most recent
      * into the past.
@@ -196,12 +352,32 @@ public class Transaction extends ChildMessage {
     private String memo;
 
     public Transaction(NetworkParameters params) {
-        super(params);
-        version = 1;
-        inputs = new ArrayList<>();
-        outputs = new ArrayList<>();
-        // We don't initialize appearsIn deliberately as it's only useful for transactions stored in the wallet.
-        length = 8; // 8 for std fields
+//        super(params);
+//        version = 1;
+//        inputs = new ArrayList<>();
+//        outputs = new ArrayList<>();
+//        // We don't initialize appearsIn deliberately as it's only useful for transactions stored in the wallet.
+//        length = 8; // 8 for std fields
+    	    super(params);
+        this.purpose = Transaction.Purpose.UNKNOWN;
+        this.version = (long)params.getTransactionVersion();
+        this.inputs = new ArrayList();
+        this.outputs = new ArrayList();
+        this.length = 8;
+        Family txFamily = Networks.getFamily(params);
+        if (txFamily == Family.PEERCOIN || txFamily == Family.NUBITS || txFamily == Family.REDDCOIN && this.version > 1L || txFamily == Family.VPNCOIN || txFamily == Family.NAVCOIN || txFamily == Family.CLAMS || txFamily == Family.GRIDCOIN || txFamily == Family.SOLARCOIN && this.version > 3L) {
+            this.txTime = (new Date()).getTime() / 1000L;
+            this.length += 4;
+        }
+
+        if (txFamily == Family.NUBITS) {
+            this.txTokenId = params.getTokenId();
+        }
+
+        if (txFamily == Family.VPNCOIN || txFamily == Family.GRIDCOIN || (txFamily == Family.CLAMS || txFamily == Family.SOLARCOIN || txFamily == Family.NAVCOIN || txFamily == Family.ZCASH) && this.version > 1L) {
+            this.extraBytes = new byte[0];
+        }
+
     }
 
     /**
@@ -209,6 +385,7 @@ public class Transaction extends ChildMessage {
      */
     public Transaction(NetworkParameters params, byte[] payloadBytes) throws ProtocolException {
         super(params, payloadBytes, 0);
+        this.purpose = Transaction.Purpose.UNKNOWN;
     }
 
     /**
@@ -233,6 +410,7 @@ public class Transaction extends ChildMessage {
     public Transaction(NetworkParameters params, byte[] payload, int offset, @Nullable Message parent, MessageSerializer setSerializer, int length)
             throws ProtocolException {
         super(params, payload, offset, parent, setSerializer, length);
+        this.purpose = Transaction.Purpose.UNKNOWN;
     }
 
     /**
@@ -486,6 +664,7 @@ public class Transaction extends ChildMessage {
         ALL(1),
         NONE(2),
         SINGLE(3),
+        FORKID(64),
         ANYONECANPAY(0x80), // Caution: Using this type in isolation is non-standard. Treated similar to ANYONECANPAY_ALL.
         ANYONECANPAY_ALL(0x81),
         ANYONECANPAY_NONE(0x82),

@@ -21,6 +21,7 @@ package org.bitcoinj.core;
 import org.bitcoinj.crypto.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
+import com.google.common.base.MoreObjects.ToStringHelper;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
@@ -93,6 +94,106 @@ import static com.google.common.base.Preconditions.*;
  * can usually ignore the compressed/uncompressed distinction.</p>
  */
 public class ECKey implements EncryptableItem {
+	    static {
+	        if (Utils.isAndroidRuntime()) {
+	            LinuxSecureRandom linuxSecureRandom = new LinuxSecureRandom();
+	        }     
+	    }
+
+	    public String signMessage(byte[] headerBytes, String message, KeyParameter aesKey) throws KeyCrypterException {
+	        Sha256Hash hash = Sha256Hash.twiceOf(Utils.formatMessageForSigning(headerBytes, message));
+	        ECDSASignature sig = sign(hash, aesKey);
+	        int recId = -1;
+	        for (int i = 0; i < 4; i++) {
+	            ECKey k = recoverFromSignature(i, sig, hash, isCompressed());
+	            if (k != null && k.pub.equals(this.pub)) {
+	                recId = i;
+	                break;
+	            }
+	        }
+	        if (recId == -1) {
+	            throw new RuntimeException("Could not construct a recoverable key. This should never happen.");
+	        }
+	        byte[] sigData = new byte[65];
+	        sigData[0] = (byte) ((recId + 27) + (isCompressed() ? 4 : 0));
+	        System.arraycopy(Utils.bigIntegerToBytes(sig.r, 32), 0, sigData, 1, 32);
+	        System.arraycopy(Utils.bigIntegerToBytes(sig.s, 32), 0, sigData, 33, 32);
+	        return new String(Base64.encode(sigData), Charset.forName("UTF-8"));
+	    }
+
+	    public static ECKey signedMessageToKey(byte[] headerBytes, String message, String signatureBase64) throws SignatureException {
+	        try {
+	            byte[] signatureEncoded = Base64.decode(signatureBase64);
+	            if (signatureEncoded.length < 65) {
+	                throw new SignatureException("Signature truncated, expected 65 bytes and got " + signatureEncoded.length);
+	            }
+	            int header = signatureEncoded[0] & 255;
+	            if (header < 27 || header > 34) {
+	                throw new SignatureException("Header byte out of range: " + header);
+	            }
+	            ECDSASignature sig = new ECDSASignature(new BigInteger(1, Arrays.copyOfRange(signatureEncoded, 1, 33)), new BigInteger(1, Arrays.copyOfRange(signatureEncoded, 33, 65)));
+	            Sha256Hash messageHash = Sha256Hash.twiceOf(Utils.formatMessageForSigning(headerBytes, message));
+	            boolean compressed = false;
+	            if (header >= 31) {
+	                compressed = true;
+	                header -= 4;
+	            }
+	            ECKey key = recoverFromSignature(header - 27, sig, messageHash, compressed);
+	            if (key != null) {
+	                return key;
+	            }
+	            throw new SignatureException("Could not recover public key from signature");
+	        } catch (RuntimeException e) {
+	            throw new SignatureException("Could not decode base64", e);
+	        }
+	    }
+
+	    public String toStringWithPrivate(NetworkParameters params) {
+	        return toString(true, params);
+	    }
+
+	    private String toString(boolean includePrivate, NetworkParameters params) {
+	        ToStringHelper helper = MoreObjects.toStringHelper(this).omitNullValues();
+	        helper.add("pub HEX", getPublicKeyAsHex());
+	        if (includePrivate) {
+	            try {
+	                helper.add("priv HEX", getPrivateKeyAsHex());
+	                helper.add("priv WIF", getPrivateKeyAsWiF(params));
+	            } catch (IllegalStateException e) {
+	            } catch (Exception e2) {
+	                String message = e2.getMessage();
+	                helper.add("priv EXCEPTION", e2.getClass().getName() + (message != null ? ": " + message : ""));
+	            }
+	        }
+	        if (this.creationTimeSeconds > 0) {
+	            helper.add("creationTimeSeconds", this.creationTimeSeconds);
+	        }
+	        helper.add("keyCrypter", this.keyCrypter);
+	        if (includePrivate) {
+	            helper.add("encryptedPrivateKey", this.encryptedPrivateKey);
+	        }
+	        helper.add("isEncrypted", isEncrypted());
+	        helper.add("isPubKeyOnly", isPubKeyOnly());
+	        return helper.toString();
+	    }
+
+	    public void formatKeyWithAddress(boolean includePrivateKeys, StringBuilder builder, NetworkParameters params) {
+	        Address address = toAddress(params);
+	        builder.append("  addr:");
+	        builder.append(address.toString());
+	        builder.append("  hash160:");
+	        builder.append(Utils.HEX.encode(getPubKeyHash()));
+	        if (this.creationTimeSeconds > 0) {
+	            builder.append("  creationTimeSeconds:").append(this.creationTimeSeconds);
+	        }
+	        builder.append("\n");
+	        if (includePrivateKeys) {
+	            builder.append("  ");
+	            builder.append(toStringWithPrivate(params));
+	            builder.append("\n");
+	        }
+	    }
+//TODO	    
     private static final Logger log = LoggerFactory.getLogger(ECKey.class);
 
     /** Sorts oldest keys first, newest last. */
