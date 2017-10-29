@@ -471,12 +471,13 @@ public class Transaction extends ChildMessage {
      */
     public Coin getValueSentToMe(TransactionBag transactionBag) {
         // This is tested in WalletTest.
-        Coin v = Coin.ZERO;
-        for (TransactionOutput o : outputs) {
-            if (!o.isMineOrWatched(transactionBag)) continue;
-            v = v.add(o.getValue());
-        }
-        return v;
+//        Coin v = Coin.ZERO;
+//        for (TransactionOutput o : outputs) {
+//            if (!o.isMineOrWatched(transactionBag)) continue;
+//            v = v.add(o.getValue());
+//        }
+//        return v;
+    	return this.getValueSentToMe(transactionBag, true);
     }
 
     /**
@@ -848,7 +849,10 @@ public class Transaction extends ChildMessage {
         if (isOptInFullRBF()) {
             s.append("  opts into full replace-by-fee\n");
         }
-        if (isCoinBase()) {
+        if (this.inputs.size() == 0) {
+            s.append("  INCOMPLETE: No inputs!\n");
+            return s.toString();
+        } else if (isCoinBase()) {
             String script;
             String script2;
             try {
@@ -861,7 +865,12 @@ public class Transaction extends ChildMessage {
             s.append("     == COINBASE TXN (scriptSig ").append(script)
                 .append(")  (scriptPubKey ").append(script2).append(")\n");
             return s.toString();
-        }
+        } else {
+            if (this.isCoinStake()) {
+                s.append("     == COINSTAKE TXN\n");
+            }
+            }
+
         if (!inputs.isEmpty()) {
             for (TransactionInput in : inputs) {
                 s.append("     ");
@@ -1092,7 +1101,7 @@ public class Transaction extends ChildMessage {
                                                                 byte[] redeemScript,
                                                                 SigHash hashType, boolean anyoneCanPay) {
         Sha256Hash hash = hashForSignature(inputIndex, redeemScript, hashType, anyoneCanPay);
-        return new TransactionSignature(key.sign(hash), hashType, anyoneCanPay);
+        return new TransactionSignature(key.sign(hash), this.getSigHashType(hashType, anyoneCanPay));
     }
 
     /**
@@ -1206,8 +1215,11 @@ public class Transaction extends ChildMessage {
         // the purposes of the code in this method:
         //
         //   https://en.bitcoin.it/wiki/Contracts
-
+        if (Networks.isFamily(this.params, new Family[]{Family.BITCOINCASH})) {
+            return this.hashForSignatureWitness(inputIndex, connectedScript, this.getInput((long)inputIndex).getValue(), this.decodeSigHashType(sigHashType), (sigHashType & -128) == -128);
+        } else {
         try {
+ 
             // Create a copy of this transaction to operate upon because we need make changes to the inputs and outputs.
             // It would not be thread-safe to change the attributes of the transaction object itself.
             Transaction tx = this.params.getDefaultSerializer().makeTransaction(this.bitcoinSerialize());
@@ -1273,7 +1285,12 @@ public class Transaction extends ChildMessage {
             }
 
             ByteArrayOutputStream bos = new UnsafeByteArrayOutputStream(tx.length == UNKNOWN_LENGTH ? 256 : tx.length + 4);
-            tx.bitcoinSerialize(bos);
+            if (Networks.isFamily(this.params, new Family[]{Family.REDDCOIN})) {
+                tx.bitcoinSerializeToStream(bos, false);
+            } else {
+                tx.bitcoinSerialize(bos);
+            }
+
             // We also have to write a hash type (sigHashType is actually an unsigned char)
             uint32ToByteStreamLE(0x000000ff & sigHashType, bos);
             // Note that this is NOT reversed to ensure it will be signed correctly. If it were to be printed out
@@ -1284,6 +1301,7 @@ public class Transaction extends ChildMessage {
             return hash;
         } catch (IOException e) {
             throw new RuntimeException(e);  // Cannot happen.
+        }
         }
     }
 
@@ -1389,8 +1407,15 @@ public class Transaction extends ChildMessage {
      * Returns the confidence object for this transaction from the {@link org.bitcoinj.core.TxConfidenceTable}
      * referenced by the implicit {@link Context}.
      */
-    public TransactionConfidence getConfidence() {
-        return getConfidence(Context.get());
+//    public TransactionConfidence getConfidence() {
+//        return getConfidence(Context.get());
+//    }
+    public synchronized TransactionConfidence getConfidence() {
+        if (this.confidence == null) {
+            this.confidence = new TransactionConfidence(this.getHash());
+        }
+
+        return this.confidence;
     }
 
     /**

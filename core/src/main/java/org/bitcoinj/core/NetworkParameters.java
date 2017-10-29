@@ -140,9 +140,10 @@ public abstract class NetworkParameters implements Serializable{
         this.alertSigningKey = SATOSHI_KEY;
         this.checkpoints = new HashMap();
         this.defaultSerializer = null;
-        this.genesisBlock = createGenesis(this);
-        this.httpSeeds = new Details[0];
         this.transactionVersion = 1;
+        this.httpSeeds = new Details[0];
+        this.genesisBlock = createGenesis(this);
+
     }
 
     private static Block createGenesis(NetworkParameters n) {

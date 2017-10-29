@@ -54,6 +54,11 @@ public class TransactionSignature extends ECKey.ECDSASignature {
         super(signature.r, signature.s);
         sighashFlags = calcSigHashValue(mode, anyoneCanPay);
     }
+    
+    public TransactionSignature(ECKey.ECDSASignature signature, int sighashFlags) {
+        super(signature.r, signature.s);
+        this.sighashFlags = sighashFlags;
+    }
 
     /**
      * Returns a dummy invalid signature whose R/S values are set such that they will take up the same number of

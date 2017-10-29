@@ -198,6 +198,14 @@ public class DeterministicSeed implements EncryptableItem {
         byte[] seed = encryptedSeed == null ? null : crypter.decrypt(encryptedSeed, aesKey);
         return new DeterministicSeed(mnemonic, seed, passphrase, creationTimeSeconds);
     }
+    
+    public DeterministicSeed decrypt(KeyCrypter crypter, KeyParameter aesKey) {
+        checkState(isEncrypted());
+        checkNotNull(encryptedMnemonicCode);
+        List<String> mnemonic = decodeMnemonicCode(crypter.decrypt(encryptedMnemonicCode, aesKey));
+        byte[] seed = encryptedSeed == null ? null : crypter.decrypt(encryptedSeed, aesKey);
+        return new DeterministicSeed(seed, mnemonic, creationTimeSeconds);
+    }
 
     @Override
     public boolean equals(Object o) {
