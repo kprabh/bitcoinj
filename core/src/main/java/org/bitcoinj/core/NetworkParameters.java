@@ -97,7 +97,7 @@ public abstract class NetworkParameters implements Serializable{
 
     // TODO: Seed nodes should be here as well.
 
-    protected Block genesisBlock;
+    protected transient Block genesisBlock;
     protected BigInteger maxTarget;
     protected int port;
     protected long packetMagic;  // Indicates message origin network and is used to seek to the next message when stream state is unknown.
@@ -130,7 +130,7 @@ public abstract class NetworkParameters implements Serializable{
     protected int[] acceptableAddressCodes;
     protected String[] dnsSeeds;
     protected int[] addrSeeds;
-    protected HttpDiscovery.Details[] httpSeeds = {};
+    protected transient HttpDiscovery.Details[] httpSeeds = {};
     protected Map<Integer, Sha256Hash> checkpoints = new HashMap<>();
     protected transient MessageSerializer defaultSerializer = null;
 
